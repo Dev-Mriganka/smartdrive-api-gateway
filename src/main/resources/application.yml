@@ -12,10 +12,11 @@ spring:
           enabled: true
           lower-case-service-id: true
       routes:
-        - id: auth-service
+        # Auth Service Routes
+        - id: auth-service-oauth2
           uri: lb://auth-service
           predicates:
-            - Path=/auth/**
+            - Path=/auth/oauth2/**
           filters:
             - StripPrefix=1
             - name: CircuitBreaker
@@ -23,21 +24,45 @@ spring:
                 name: auth-service-circuit-breaker
                 fallbackUri: forward:/fallback/auth
         
-        - id: ai-service
-          uri: lb://ai-service
+        - id: auth-service-well-known
+          uri: lb://auth-service
           predicates:
-            - Path=/ai/**
+            - Path=/auth/.well-known/**
           filters:
             - StripPrefix=1
             - name: CircuitBreaker
               args:
-                name: ai-service-circuit-breaker
-                fallbackUri: forward:/fallback/ai
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
         
+        - id: auth-service-api
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/api/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
+        
+        # User Service Routes
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/users/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: user-service-circuit-breaker
+                fallbackUri: forward:/fallback/users
+        
+        # File Storage Service Routes
         - id: file-storage-service
           uri: lb://file-storage-service
           predicates:
-            - Path=/files/**
+            - Path=/api/v1/files/**
           filters:
             - StripPrefix=1
             - name: CircuitBreaker
@@ -45,10 +70,23 @@ spring:
                 name: file-storage-circuit-breaker
                 fallbackUri: forward:/fallback/files
         
+        # AI Service Routes
+        - id: ai-service
+          uri: lb://ai-service
+          predicates:
+            - Path=/api/v1/ai/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: ai-service-circuit-breaker
+                fallbackUri: forward:/fallback/ai
+        
+        # Search Service Routes
         - id: search-service
           uri: lb://search-service
           predicates:
-            - Path=/search/**
+            - Path=/api/v1/search/**
           filters:
             - StripPrefix=1
             - name: CircuitBreaker
