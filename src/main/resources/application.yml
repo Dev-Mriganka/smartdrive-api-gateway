@@ -9,16 +9,19 @@ spring:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:2}
       password: ${REDIS_PASSWORD:}
       timeout: 2000ms
 
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: false
-          lower-case-service-id: true
-      routes:
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: false
+              lower-case-service-id: true
+          routes:
             # Auth Service Routes
             - id: auth-service-oauth2
               uri: lb://auth-service
