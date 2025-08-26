@@ -83,6 +83,8 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
         return path.startsWith("/auth/oauth2/") ||
                path.startsWith("/auth/.well-known/") ||
                path.startsWith("/auth/api/v1/users/register") ||
+               path.startsWith("/api/v1/users/register") ||
+               path.startsWith("/api/v1/users/verify-email") ||
                path.startsWith("/actuator/health") ||
                path.startsWith("/actuator/info");
     }

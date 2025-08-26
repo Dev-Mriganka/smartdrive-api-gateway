@@ -4,101 +4,102 @@ server:
 spring:
   application:
     name: gateway-service
-  
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+
   cloud:
     gateway:
       discovery:
         locator:
-          enabled: true
+          enabled: false
           lower-case-service-id: true
       routes:
-        # Auth Service Routes
-        - id: auth-service-oauth2
-          uri: lb://auth-service
-          predicates:
-            - Path=/auth/oauth2/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: auth-service-circuit-breaker
-                fallbackUri: forward:/fallback/auth
-        
-        - id: auth-service-well-known
-          uri: lb://auth-service
-          predicates:
-            - Path=/auth/.well-known/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: auth-service-circuit-breaker
-                fallbackUri: forward:/fallback/auth
-        
-        - id: auth-service-api
-          uri: lb://auth-service
-          predicates:
-            - Path=/auth/api/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: auth-service-circuit-breaker
-                fallbackUri: forward:/fallback/auth
-        
-        # User Service Routes
-        - id: user-service
-          uri: lb://user-service
-          predicates:
-            - Path=/api/v1/users/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: user-service-circuit-breaker
-                fallbackUri: forward:/fallback/users
-        
-        # File Storage Service Routes
-        - id: file-storage-service
-          uri: lb://file-storage-service
-          predicates:
-            - Path=/api/v1/files/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: file-storage-circuit-breaker
-                fallbackUri: forward:/fallback/files
-        
-        # AI Service Routes
-        - id: ai-service
-          uri: lb://ai-service
-          predicates:
-            - Path=/api/v1/ai/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: ai-service-circuit-breaker
-                fallbackUri: forward:/fallback/ai
-        
-        # Search Service Routes
-        - id: search-service
-          uri: lb://search-service
-          predicates:
-            - Path=/api/v1/search/**
-          filters:
-            - StripPrefix=1
-            - name: CircuitBreaker
-              args:
-                name: search-service-circuit-breaker
-                fallbackUri: forward:/fallback/search
+            # Auth Service Routes
+            - id: auth-service-oauth2
+              uri: lb://auth-service
+              predicates:
+                - Path=/auth/oauth2/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: auth-service-circuit-breaker
+                    fallbackUri: forward:/fallback/auth
+
+            - id: auth-service-well-known
+              uri: lb://auth-service
+              predicates:
+                - Path=/auth/.well-known/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: auth-service-circuit-breaker
+                    fallbackUri: forward:/fallback/auth
+
+            - id: auth-service-api
+              uri: lb://auth-service
+              predicates:
+                - Path=/auth/api/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: auth-service-circuit-breaker
+                    fallbackUri: forward:/fallback/auth
+
+            # User Service Routes
+            - id: user-service
+              uri: lb://user-service
+              predicates:
+                - Path=/api/v1/users/**
+
+            # File Storage Service Routes
+            - id: file-storage-service
+              uri: lb://file-storage-service
+              predicates:
+                - Path=/api/v1/files/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: file-storage-circuit-breaker
+                    fallbackUri: forward:/fallback/files
+
+            # AI Service Routes
+            - id: ai-service
+              uri: lb://ai-service
+              predicates:
+                - Path=/api/v1/ai/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: ai-service-circuit-breaker
+                    fallbackUri: forward:/fallback/ai
+
+            # Search Service Routes
+            - id: search-service
+              uri: lb://search-service
+              predicates:
+                - Path=/api/v1/search/**
+              filters:
+                - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: search-service-circuit-breaker
+                    fallbackUri: forward:/fallback/search
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8085/oauth2/.well-known/oauth-authorization-server
+          issuer-uri: http://auth-service:8085/auth/realms/smartdrive
 
 management:
   endpoints:
@@ -115,3 +116,24 @@ logging:
     org.springframework.cloud.gateway: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Eureka Client Configuration
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    hostname: api-gateway
+
+  cloud:
+    loadbalancer:
+      cache:
+        enabled: true
+        ttl: 35s
+        capacity: 256
+      health-check:
+        initial-delay: 0
+        interval: 25s

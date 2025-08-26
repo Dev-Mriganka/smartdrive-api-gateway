@@ -22,7 +22,7 @@ repositories {
 }
 
 ext {
-    set('springCloudVersion', '2023.0.2')
+    set('springCloudVersion', '2025.0.0')
 }
 
 dependencyManagement {
@@ -33,7 +33,13 @@ dependencyManagement {
 
 dependencies {
     // Spring Cloud Gateway
-    implementation 'org.springframework.cloud:spring-cloud-starter-gateway'
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+    
+    // Service Discovery
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    
+    // Load Balancer for service discovery
+    implementation 'org.springframework.cloud:spring-cloud-starter-loadbalancer'
     
     // Security
     implementation 'org.springframework.boot:spring-boot-starter-security'

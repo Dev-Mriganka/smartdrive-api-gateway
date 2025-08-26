@@ -7,12 +7,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.csrf.CsrfToken;
 import org.springframework.web.server.WebFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.reactive.CorsWebFilter;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import reactor.core.publisher.Mono;
 
 /**
@@ -37,7 +37,7 @@ public class SecurityConfig {
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
             
             // Configure CORS
-            .cors(ServerHttpSecurity.CorsSpec::disable)
+            .cors(Customizer.withDefaults())
             
             // Configure authorization
             .authorizeExchange(exchanges -> exchanges
@@ -46,6 +46,8 @@ public class SecurityConfig {
                     "/auth/oauth2/**",
                     "/auth/.well-known/**",
                     "/auth/api/v1/users/register",
+                    "/api/v1/users/register",
+                    "/api/v1/users/verify-email",
                     "/actuator/health",
                     "/actuator/info"
                 ).permitAll()
@@ -65,6 +67,10 @@ public class SecurityConfig {
         log.info("✅ API Gateway security filter chain configured successfully");
         return http.build();
     }
+
+
+
+
 
 
 
