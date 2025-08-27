@@ -2,88 +2,124 @@ package com.smartdrive.gateway.filter;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 
-/**
- * Global authentication filter for API Gateway
- * Validates JWT tokens and propagates user context
- */
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class AuthenticationFilter implements GlobalFilter, Ordered {
+
+    @Value("${gateway.internal.auth.secret:gateway-secret-2024}")
+    private String internalAuthSecret;
+
+    @Value("${gateway.signature.secret:signature-secret-2024}")
+    private String signatureSecret;
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getPath().value();
         
-        log.debug("🔍 Processing request: {} {}", request.getMethod(), path);
+        log.debug("🔍 Enhanced auth processing: {} {}", request.getMethod(), path);
         
-        // Skip authentication for public endpoints
+        // Skip for public endpoints
         if (isPublicEndpoint(path)) {
-            log.debug("✅ Public endpoint - skipping authentication: {}", path);
-            return chain.filter(exchange);
+            return addPublicHeaders(exchange, chain);
         }
         
         return ReactiveSecurityContextHolder.getContext()
             .map(context -> context.getAuthentication())
+            .cast(JwtAuthenticationToken.class)
             .flatMap(authentication -> {
-                if (authentication != null && authentication.getPrincipal() instanceof Jwt) {
-                    Jwt jwt = (Jwt) authentication.getPrincipal();
-                    return addUserContextHeaders(exchange, jwt, chain);
-                } else {
-                    log.warn("⚠️ No valid JWT authentication found for: {}", path);
-                    return chain.filter(exchange);
-                }
+                Jwt jwt = authentication.getToken();
+                return addAuthenticatedUserHeaders(exchange, jwt, chain);
             })
             .switchIfEmpty(chain.filter(exchange));
     }
 
     /**
-     * Add user context headers to downstream services
+     * Add headers for authenticated requests
      */
-    private Mono<Void> addUserContextHeaders(ServerWebExchange exchange, Jwt jwt, GatewayFilterChain chain) {
-        ServerHttpRequest request = exchange.getRequest();
-        
-        // Extract user information from JWT
+    private Mono<Void> addAuthenticatedUserHeaders(ServerWebExchange exchange, Jwt jwt, GatewayFilterChain chain) {
         String userId = jwt.getSubject();
         String username = jwt.getClaimAsString("preferred_username");
+        String email = jwt.getClaimAsString("email");
         List<String> roles = jwt.getClaimAsStringList("roles");
+        String path = exchange.getRequest().getPath().value();
         
-        log.debug("👤 User context - ID: {}, Username: {}, Roles: {}", userId, username, roles);
+        // Generate signature for internal authentication
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = generateSignature(userId, path, timestamp);
         
-        // Add user context headers for downstream services
-        ServerHttpRequest modifiedRequest = request.mutate()
+        ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
             .header("X-User-ID", userId)
             .header("X-User-Username", username != null ? username : "")
+            .header("X-User-Email", email != null ? email : "")
             .header("X-User-Roles", roles != null ? String.join(",", roles) : "")
-            .header("X-User-Email", jwt.getClaimAsString("email"))
+            .header("X-Internal-Auth", internalAuthSecret)
+            .header("X-Gateway-Signature", signature)
+            .header("X-Gateway-Timestamp", timestamp)
+            .header("X-Forwarded-By", "SmartDrive-Gateway")
+            .build();
+        
+        log.debug("✅ User context headers added for user: {}", username);
+        return chain.filter(exchange.mutate().request(modifiedRequest).build());
+    }
+
+    /**
+     * Add headers for public requests (still need internal auth for verification endpoints)
+     */
+    private Mono<Void> addPublicHeaders(ServerWebExchange exchange, GatewayFilterChain chain) {
+        String path = exchange.getRequest().getPath().value();
+        
+        // Add internal auth header for service-to-service calls
+        ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
+            .header("X-Internal-Auth", internalAuthSecret)
+            .header("X-Forwarded-By", "SmartDrive-Gateway")
             .build();
         
         return chain.filter(exchange.mutate().request(modifiedRequest).build());
     }
 
     /**
-     * Check if endpoint is public (no authentication required)
+     * Generate HMAC signature for request validation
      */
+    private String generateSignature(String userId, String path, String timestamp) {
+        try {
+            String data = userId + "|" + path + "|" + timestamp;
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec secretKeySpec = new SecretKeySpec(signatureSecret.getBytes(), "HmacSHA256");
+            mac.init(secretKeySpec);
+            byte[] signature = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(signature);
+        } catch (Exception e) {
+            log.error("❌ Failed to generate signature", e);
+            return "invalid";
+        }
+    }
+
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/auth/oauth2/") ||
                path.startsWith("/auth/.well-known/") ||
-               path.startsWith("/auth/api/v1/users/register") ||
-               path.startsWith("/api/v1/users/register") ||
+               path.equals("/api/v1/users/register") ||
                path.startsWith("/api/v1/users/verify-email") ||
                path.startsWith("/actuator/health") ||
                path.startsWith("/actuator/info");
@@ -91,6 +127,6 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE + 100; // Run after security filters
+        return Ordered.HIGHEST_PRECEDENCE + 100;
     }
 }

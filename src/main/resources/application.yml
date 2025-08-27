@@ -57,10 +57,27 @@ spring:
                     fallbackUri: forward:/fallback/auth
 
             # User Service Routes
-            - id: user-service
+            - id: user-admin-routes
               uri: lb://user-service
               predicates:
+                - Path=/api/v1/admin/users/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: user-service-admin-cb
+                    fallbackUri: forward:/fallback/users
+
+            # User Service - Regular Routes
+            - id: user-service-routes
+              uri: lb://user-service  
+              predicates:
                 - Path=/api/v1/users/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: user-service-cb
+                    fallbackUri: forward:/fallback/users
+
 
             # File Storage Service Routes
             - id: file-storage-service
@@ -140,3 +157,11 @@ eureka:
       health-check:
         initial-delay: 0
         interval: 25s
+
+# Internal service authentication
+gateway:
+  internal:
+    auth:
+      secret: ${GATEWAY_INTERNAL_SECRET:gateway-secret-2024}
+  signature:
+    secret: ${GATEWAY_SIGNATURE_SECRET:signature-secret-2024}
