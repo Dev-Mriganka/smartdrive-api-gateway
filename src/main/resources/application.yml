@@ -1,5 +1,20 @@
 server:
   port: 8080
+  # Security configuration
+  servlet:
+    session:
+      cookie:
+        secure: true
+        http-only: true
+        same-site: strict
+  # Connection and timeout settings
+  netty:
+    connection-timeout: 30s
+    idle-timeout: 60s
+  compression:
+    enabled: true
+  http2:
+    enabled: true
 
 spring:
   application:
@@ -51,6 +66,17 @@ spring:
                 - Path=/auth/api/**
               filters:
                 - StripPrefix=1
+                - name: CircuitBreaker
+                  args:
+                    name: auth-service-circuit-breaker
+                    fallbackUri: forward:/fallback/auth
+
+            # Direct Auth API Routes (for UI login)
+            - id: auth-service-direct
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/v1/auth/**
+              filters:
                 - name: CircuitBreaker
                   args:
                     name: auth-service-circuit-breaker
@@ -119,7 +145,10 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://auth-service:8085/auth/realms/smartdrive
+          # Use JWK Set URI for local token validation (faster!)
+          jwk-set-uri: http://auth-service:8085/.well-known/jwks.json
+          # JWT decoder configuration for fast local validation
+          issuer-uri: http://auth-service:8085
 
 management:
   endpoints:
@@ -158,10 +187,22 @@ eureka:
         initial-delay: 0
         interval: 25s
 
-# Internal service authentication
+# Gateway Security Configuration
 gateway:
-  internal:
-    auth:
-      secret: ${GATEWAY_INTERNAL_SECRET:gateway-secret-2024}
-  signature:
-    secret: ${GATEWAY_SIGNATURE_SECRET:signature-secret-2024}
+  security:
+    internal-secret: ${GATEWAY_SECURITY_INTERNAL_SECRET:}
+    signature-secret: ${GATEWAY_SECURITY_SIGNATURE_SECRET:}
+    jwt-signing-key: ${GATEWAY_SECURITY_JWT_SIGNING_KEY:}
+  # Rate limiting configuration
+  rate-limit:
+    enabled: true
+    requests-per-minute: ${RATE_LIMIT_RPM:100}
+    requests-per-hour: ${RATE_LIMIT_RPH:1000}
+    burst-capacity: ${RATE_LIMIT_BURST:150}
+  # Circuit breaker configuration
+  circuit-breaker:
+    failure-rate-threshold: 50
+    slow-call-rate-threshold: 50
+    slow-call-duration-threshold: 60s
+    minimum-number-of-calls: 10
+    sliding-window-size: 10

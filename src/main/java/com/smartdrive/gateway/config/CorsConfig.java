@@ -28,7 +28,8 @@ public class CorsConfig {
         corsConfig.setAllowedOriginPatterns(Arrays.asList(
             "http://localhost:3000",  // React development
             "http://localhost:4200",  // Angular development
-            "http://localhost:5173",  // Vite development
+            "http://localhost:5173",  // Vite development (default)
+            "http://localhost:5174",  // Vite development (alternative port)
             "http://localhost:8080",  // Vue development
             "https://smartdrive.local", // Production domain
             "https://*.smartdrive.com"  // Wildcard for subdomains
