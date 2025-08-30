@@ -41,9 +41,9 @@ public class FallbackController {
     /**
      * User service fallback
      */
-    @GetMapping("/users")
+    @RequestMapping("/users")
     public Mono<ResponseEntity<Map<String, Object>>> userFallback() {
-        log.warn("⚠️ User service is unavailable - using fallback");
+        log.error("🚨 USER SERVICE FALLBACK TRIGGERED - Circuit breaker activated!");
         
         Map<String, Object> response = new HashMap<>();
         response.put("error", "Service Unavailable");

@@ -1,3 +1,4 @@
+# in api-gateway/src/main/resources/application.yml
 server:
   port: 8080
   # Security configuration
@@ -10,7 +11,7 @@ server:
   # Connection and timeout settings
   netty:
     connection-timeout: 30s
-    idle-timeout: 60s
+    idle-timeout: 30s
   compression:
     enabled: true
   http2:
@@ -28,118 +29,121 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 2000ms
 
+  # ✅ FIXED: Moved cloud config under main spring key
   cloud:
     gateway:
-      server:
-        webflux:
-          discovery:
-            locator:
-              enabled: false
-              lower-case-service-id: true
-          routes:
-            # Auth Service Routes
-            - id: auth-service-oauth2
-              uri: lb://auth-service
-              predicates:
-                - Path=/auth/oauth2/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: auth-service-circuit-breaker
-                    fallbackUri: forward:/fallback/auth
+      routes:
+        # === AUTH SERVICE ROUTES ===
+        
+        # Google OAuth2 Social Login routes
+        - id: auth-service-social
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/v1/auth/social/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
+        
+        - id: auth-service-oauth2
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/oauth2/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
 
-            - id: auth-service-well-known
-              uri: lb://auth-service
-              predicates:
-                - Path=/auth/.well-known/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: auth-service-circuit-breaker
-                    fallbackUri: forward:/fallback/auth
+        - id: auth-service-well-known
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/.well-known/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
 
-            - id: auth-service-api
-              uri: lb://auth-service
-              predicates:
-                - Path=/auth/api/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: auth-service-circuit-breaker
-                    fallbackUri: forward:/fallback/auth
+        - id: auth-service-api
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/api/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
 
-            # Direct Auth API Routes (for UI login)
-            - id: auth-service-direct
-              uri: lb://auth-service
-              predicates:
-                - Path=/api/v1/auth/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: auth-service-circuit-breaker
-                    fallbackUri: forward:/fallback/auth
+        - id: auth-service-direct
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: auth-service-circuit-breaker
+                fallbackUri: forward:/fallback/auth
 
-            # User Service Routes
-            - id: user-admin-routes
-              uri: lb://user-service
-              predicates:
-                - Path=/api/v1/admin/users/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: user-service-admin-cb
-                    fallbackUri: forward:/fallback/users
+        # === USER SERVICE ROUTES (ORDER MATTERS!) ===
+        
+        # 1. Most specific first - Public registration
+        - id: user-service-register
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/users/register
+            - Method=POST
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: user-service-register-cb
+                fallbackUri: forward:/fallback/users
 
-            # User Service - Regular Routes
-            - id: user-service-routes
-              uri: lb://user-service  
-              predicates:
-                - Path=/api/v1/users/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: user-service-cb
-                    fallbackUri: forward:/fallback/users
+        # 2. Email verification  
+        - id: user-service-verify-email
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/users/verify-email
+            - Method=GET
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: user-service-verify-cb
+                fallbackUri: forward:/fallback/users
+
+        # 2.5 Admin creation now handled by general admin routes (requires auth)
+
+        # 3. Admin routes (simplified for debugging)
+        - id: user-service-admin
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/admin/**
+          order: 1
+
+        # 4. General user routes (least specific)
+        - id: user-service-general
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: user-service-cb
+                fallbackUri: forward:/fallback/users
 
 
-            # File Storage Service Routes
-            - id: file-storage-service
-              uri: lb://file-storage-service
-              predicates:
-                - Path=/api/v1/files/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: file-storage-circuit-breaker
-                    fallbackUri: forward:/fallback/files
-
-            # AI Service Routes
-            - id: ai-service
-              uri: lb://ai-service
-              predicates:
-                - Path=/api/v1/ai/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: ai-service-circuit-breaker
-                    fallbackUri: forward:/fallback/ai
-
-            # Search Service Routes
-            - id: search-service
-              uri: lb://search-service
-              predicates:
-                - Path=/api/v1/search/**
-              filters:
-                - StripPrefix=1
-                - name: CircuitBreaker
-                  args:
-                    name: search-service-circuit-breaker
-                    fallbackUri: forward:/fallback/search
+    loadbalancer:
+      cache:
+        enabled: true
+        ttl: 35s
+        capacity: 256
+      health-check:
+        initial-delay: 0
+        interval: 25s
 
   security:
     oauth2:
@@ -147,8 +151,8 @@ spring:
         jwt:
           # Use JWK Set URI for local token validation (faster!)
           jwk-set-uri: http://auth-service:8085/.well-known/jwks.json
-          # JWT decoder configuration for fast local validation
-          issuer-uri: http://auth-service:8085
+          # JWT decoder configuration - issuer must match token iss claim
+          issuer-uri: smartdrive-auth-service
 
 management:
   endpoints:
@@ -177,22 +181,11 @@ eureka:
     prefer-ip-address: true
     hostname: api-gateway
 
-  cloud:
-    loadbalancer:
-      cache:
-        enabled: true
-        ttl: 35s
-        capacity: 256
-      health-check:
-        initial-delay: 0
-        interval: 25s
-
 # Gateway Security Configuration
 gateway:
   security:
-    internal-secret: ${GATEWAY_SECURITY_INTERNAL_SECRET:}
-    signature-secret: ${GATEWAY_SECURITY_SIGNATURE_SECRET:}
-    jwt-signing-key: ${GATEWAY_SECURITY_JWT_SIGNING_KEY:}
+    internal-secret: ${GATEWAY_SECURITY_INTERNAL_SECRET:internal-gateway-secret-key-2024-minimum-32-chars}
+    signature-secret: ${GATEWAY_SECURITY_SIGNATURE_SECRET:signature-secret-key-2024-minimum-32-chars}
   # Rate limiting configuration
   rate-limit:
     enabled: true
@@ -203,6 +196,53 @@ gateway:
   circuit-breaker:
     failure-rate-threshold: 50
     slow-call-rate-threshold: 50
-    slow-call-duration-threshold: 60s
+    slow-call-duration-threshold: 30s
     minimum-number-of-calls: 10
     sliding-window-size: 10
+
+# Resilience4j configuration for CircuitBreaker/TimeLimiter
+resilience4j:
+  circuitbreaker:
+    instances:
+      auth-service-circuit-breaker:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 30s
+        minimum-number-of-calls: 5
+        sliding-window-size: 10
+        wait-duration-in-open-state: 10s
+      user-service-cb:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 30s
+        minimum-number-of-calls: 5
+        sliding-window-size: 10
+        wait-duration-in-open-state: 10s
+      user-service-register-cb:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 30s
+        minimum-number-of-calls: 5
+        sliding-window-size: 10
+        wait-duration-in-open-state: 10s
+      user-service-verify-cb:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 30s
+        minimum-number-of-calls: 5
+        sliding-window-size: 10
+        wait-duration-in-open-state: 10s
+  timelimiter:
+    instances:
+      auth-service-circuit-breaker:
+        timeout-duration: 30s
+        cancel-running-future: false
+      user-service-cb:
+        timeout-duration: 30s
+        cancel-running-future: false
+      user-service-register-cb:
+        timeout-duration: 30s    # allow enough time for email sending
+        cancel-running-future: false
+      user-service-verify-cb:
+        timeout-duration: 30s
+        cancel-running-future: false

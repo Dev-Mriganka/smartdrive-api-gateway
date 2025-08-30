@@ -38,7 +38,7 @@ public class RoleBasedAuthorizationFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getPath().value();
         
-        log.debug("🔍 Authorization check for path: {}", path);
+        log.info("🔍 RoleBasedAuthorizationFilter: Authorization check for path: {}", path);
         
         // Skip authorization for public endpoints
         if (isPublicEndpoint(path)) {
@@ -46,22 +46,66 @@ public class RoleBasedAuthorizationFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
         
-        return ReactiveSecurityContextHolder.getContext()
-            .map(context -> context.getAuthentication())
-            .cast(JwtAuthenticationToken.class)
-            .flatMap(authentication -> {
-                Jwt jwt = authentication.getToken();
-                List<String> userRoles = jwt.getClaimAsStringList("roles");
-                
-                if (hasRequiredRole(path, userRoles)) {
-                    log.debug("✅ Authorization granted for path: {} with roles: {}", path, userRoles);
-                    return chain.filter(exchange);
-                } else {
-                    log.warn("❌ Authorization denied for path: {} with roles: {}", path, userRoles);
-                    return handleForbidden(exchange);
+        // Try to get JWT from Authorization header
+        String authHeader = request.getHeaders().getFirst("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            
+            try {
+                // Decode JWT payload manually to extract roles
+                String[] tokenParts = token.split("\\.");
+                if (tokenParts.length == 3) {
+                    String payload = tokenParts[1];
+                    // Add padding if needed
+                    payload += "=".repeat((4 - payload.length() % 4) % 4);
+                    
+                    String decodedPayload = new String(java.util.Base64.getDecoder().decode(payload));
+                    
+                    // Simple JSON parsing to extract roles
+                    if (decodedPayload.contains("\"roles\":")) {
+                        int rolesStart = decodedPayload.indexOf("\"roles\":") + 8;
+                        int rolesEnd = decodedPayload.indexOf("]", rolesStart) + 1;
+                        String rolesJson = decodedPayload.substring(rolesStart, rolesEnd);
+                        
+                        log.info("🔍 Extracted roles from JWT: {}", rolesJson);
+                        
+                        // Extract roles - simplified parsing
+                        List<String> userRoles = extractRolesFromJson(rolesJson);
+                        
+                        if (hasRequiredRole(path, userRoles)) {
+                            log.info("✅ Authorization granted for path: {} with roles: {}", path, userRoles);
+                            return chain.filter(exchange);
+                        } else {
+                            log.warn("❌ Authorization denied for path: {} with roles: {}", path, userRoles);
+                            return handleForbidden(exchange);
+                        }
+                    }
                 }
-            })
-            .switchIfEmpty(chain.filter(exchange));
+            } catch (Exception e) {
+                log.warn("❌ Error parsing JWT token: {}", e.getMessage());
+                return handleForbidden(exchange);
+            }
+        }
+        
+        log.warn("❌ No valid JWT token found for path: {}", path);
+        return handleForbidden(exchange);
+    }
+
+    /**
+     * Extract roles from JSON array string
+     */
+    private List<String> extractRolesFromJson(String rolesJson) {
+        try {
+            // Simple extraction - look for quoted strings in the array
+            return java.util.Arrays.stream(rolesJson.replace("[", "").replace("]", "").split(","))
+                .map(String::trim)
+                .map(role -> role.replace("\"", ""))
+                .filter(role -> !role.isEmpty())
+                .toList();
+        } catch (Exception e) {
+            log.warn("❌ Error extracting roles from JSON: {}", e.getMessage());
+            return List.of();
+        }
     }
 
     /**
@@ -78,8 +122,14 @@ public class RoleBasedAuthorizationFilter implements GlobalFilter, Ordered {
                 List<String> requiredRoles = entry.getValue();
                 
                 // User needs at least one of the required roles
+                // Handle both with and without ROLE_ prefix
                 return userRoles.stream()
-                    .anyMatch(userRole -> requiredRoles.contains(userRole));
+                    .anyMatch(userRole -> {
+                        String roleWithoutPrefix = userRole.startsWith("ROLE_") 
+                            ? userRole.substring(5) 
+                            : userRole;
+                        return requiredRoles.contains(roleWithoutPrefix);
+                    });
             }
         }
         
@@ -112,7 +162,9 @@ public class RoleBasedAuthorizationFilter implements GlobalFilter, Ordered {
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/auth/oauth2/") ||
                path.startsWith("/auth/.well-known/") ||
+               path.startsWith("/api/v1/auth/") ||
                path.equals("/api/v1/users/register") ||
+               // path.equals("/api/v1/users/create-admin") || // REMOVED: Now requires authentication
                path.startsWith("/api/v1/users/verify-email") ||
                path.startsWith("/actuator/health") ||
                path.startsWith("/actuator/info");

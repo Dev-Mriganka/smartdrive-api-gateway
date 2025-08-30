@@ -28,9 +28,8 @@ public class SecretsConfig {
     @Size(min = 32, message = "Signature secret must be at least 32 characters")
     private String signatureSecret;
 
-    @NotBlank(message = "JWT signing key cannot be blank")
-    @Size(min = 256, message = "JWT signing key must be at least 256 bits")
-    private String jwtSigningKey;
+    // JWT signing key not needed for resource server (only for authorization server)
+    // private String jwtSigningKey;
 
     /**
      * Validates secrets on startup
