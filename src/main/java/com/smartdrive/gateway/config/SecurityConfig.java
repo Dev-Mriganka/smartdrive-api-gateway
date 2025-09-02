@@ -50,7 +50,13 @@ public class SecurityConfig {
                         .pathMatchers("/auth/**").permitAll()
                         .pathMatchers("/oauth2/**").permitAll()
 
-                        // 4. SPECIFIC public endpoints FIRST (most specific)
+                        // 4. Auth endpoints - MUST BE BEFORE /api/** pattern!
+                        .pathMatchers("/api/v1/auth/**").permitAll()
+                        
+                        // 5. Social auth endpoints - completely public  
+                        .pathMatchers("/api/v1/auth/social/**").permitAll()
+                        
+                        // 6. SPECIFIC public endpoints (most specific)
                         .pathMatchers(
                                 org.springframework.http.HttpMethod.POST,
                                 "/api/v1/users/register")
@@ -60,16 +66,7 @@ public class SecurityConfig {
                                 org.springframework.http.HttpMethod.GET,
                                 "/api/v1/users/verify-email")
                         .permitAll()
-
-                        // 5. Auth endpoints - completely public
-                        .pathMatchers("/api/v1/auth/**").permitAll()
                         
-                        // 6. Social auth endpoints - completely public  
-                        .pathMatchers("/api/v1/auth/social/**").permitAll()
-                        
-                        // 6. Create-admin endpoint requires authentication
-                        // REMOVED: No longer public - requires valid JWT
-
                         // 7. All authenticated API endpoints - require valid JWT
                         .pathMatchers("/api/**").authenticated()
 

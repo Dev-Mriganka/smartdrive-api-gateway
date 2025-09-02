@@ -4,7 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
@@ -24,7 +26,7 @@ public class FallbackController {
     /**
      * Auth service fallback
      */
-    @GetMapping("/auth")
+    @RequestMapping(value = "/auth", method = { RequestMethod.GET, RequestMethod.POST })
     public Mono<ResponseEntity<Map<String, Object>>> authFallback() {
         log.warn("⚠️ Auth service is unavailable - using fallback");
         

@@ -12,12 +12,13 @@ import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 
+import com.smartdrive.gateway.config.GatewayJWTCacheService;
+import com.smartdrive.gateway.config.GatewayTokenBlacklistService;
 import com.smartdrive.gateway.config.SecretsConfig;
 
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,9 @@ import reactor.core.publisher.Mono;
 public class AuthenticationFilter implements GlobalFilter, Ordered {
 
     private final SecretsConfig secretsConfig;
+    private final JwtDecoder jwtDecoder;
+    private final GatewayTokenBlacklistService blacklistService;
+    private final GatewayJWTCacheService jwtCacheService;
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -43,18 +47,24 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
             return addPublicHeaders(exchange, chain);
         }
 
-        return ReactiveSecurityContextHolder.getContext()
-                .map(context -> context.getAuthentication())
-                .cast(JwtAuthenticationToken.class)
-                .flatMap(authentication -> {
-                    Jwt jwt = authentication.getToken();
-                    return addAuthenticatedUserHeaders(exchange, jwt, chain);
-                })
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.warn("⚠️ No JWT authentication found for path: {} - trying manual JWT extraction", path);
-                    // Try manual JWT extraction as fallback
-                    return tryManualJwtExtraction(exchange, chain);
-                }));
+        // Industry Standard: Gateway validates JWT directly
+        String token = extractBearerToken(request);
+        if (token == null) {
+            log.warn("⚠️ No JWT token found for protected path: {}", path);
+            return unauthorizedResponse(exchange);
+        }
+
+        return validateTokenIndustryStandard(token)
+            .flatMap(jwt -> {
+                if (jwt == null) {
+                    return unauthorizedResponse(exchange);
+                }
+                return addAuthenticatedUserHeaders(exchange, jwt, chain);
+            })
+            .onErrorResume(error -> {
+                log.error("❌ JWT validation failed for path {}: {}", path, error.getMessage());
+                return unauthorizedResponse(exchange);
+            });
     }
 
     /**
@@ -62,7 +72,6 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
      */
     private Mono<Void> addAuthenticatedUserHeaders(ServerWebExchange exchange, Jwt jwt, GatewayFilterChain chain) {
         String userId = jwt.getSubject();
-        String username = jwt.getClaimAsString("username");
         String email = jwt.getClaimAsString("email");
         List<String> roles = jwt.getClaimAsStringList("roles");
         String path = exchange.getRequest().getPath().value();
@@ -73,7 +82,6 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
 
         ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
                 .header("X-User-ID", userId)
-                .header("X-User-Username", username != null ? username : "")
                 .header("X-User-Email", email != null ? email : "")
                 .header("X-User-Roles", roles != null ? String.join(",", roles) : "")
                 .header("X-Internal-Auth", secretsConfig.getInternalSecret())
@@ -83,7 +91,7 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
                 .header("X-Request-ID", generateRequestId())
                 .build();
 
-        log.debug("✅ User context headers added for user: {}", username);
+        log.debug("✅ User context headers added for user: {}", email);
         return chain.filter(exchange.mutate().request(modifiedRequest).build());
     }
 
@@ -94,9 +102,15 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
     private Mono<Void> addPublicHeaders(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
 
-        // Add internal auth header for service-to-service calls
+        // Generate signature for public requests (no userId)
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = generateSignature("", path, timestamp);
+
+        // Add internal auth and signature headers for service-to-service validation
         ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
                 .header("X-Internal-Auth", secretsConfig.getInternalSecret())
+                .header("X-Gateway-Signature", signature)
+                .header("X-Gateway-Timestamp", timestamp)
                 .header("X-Forwarded-By", "SmartDrive-Gateway")
                 .header("X-Request-ID", generateRequestId())
                 .build();
@@ -128,6 +142,8 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
                 path.startsWith("/api/v1/auth/") ||
                 path.equals("/api/v1/users/register") ||
                 path.startsWith("/api/v1/users/verify-email") ||
+                path.startsWith("/api/v1/users/profile/email") ||
+                path.startsWith("/api/v1/users/exists/") ||
                 path.startsWith("/actuator/health") ||
                 path.startsWith("/actuator/info");
     }
@@ -156,13 +172,12 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
                     
                     // Extract user info using simple JSON parsing
                     String userId = extractJsonValue(decodedPayload, "sub");
-                    String username = extractJsonValue(decodedPayload, "username");
                     String email = extractJsonValue(decodedPayload, "email");
                     String rolesJson = extractJsonArray(decodedPayload, "roles");
                     
                     if (userId != null) {
-                        log.info("⚙️ Manual JWT extraction successful for user: {} (path: {})", username, path);
-                        return addManualAuthHeaders(exchange, userId, username, email, rolesJson, chain);
+                        log.info("⚙️ Manual JWT extraction successful for user: {} (path: {})", email, path);
+                        return addManualAuthHeaders(exchange, userId, email, rolesJson, chain);
                     }
                 }
             } catch (Exception e) {
@@ -178,7 +193,7 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
      * Add headers based on manually extracted JWT
      */
     private Mono<Void> addManualAuthHeaders(ServerWebExchange exchange, String userId, 
-                                          String username, String email, String rolesJson, 
+                                          String email, String rolesJson, 
                                           GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
@@ -186,7 +201,6 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
         
         ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
                 .header("X-User-ID", userId)
-                .header("X-User-Username", username != null ? username : "")
                 .header("X-User-Email", email != null ? email : "")
                 .header("X-User-Roles", rolesJson != null ? rolesJson.replace("[", "").replace("]", "").replace("\"", "") : "")
                 .header("X-Internal-Auth", secretsConfig.getInternalSecret())
@@ -196,7 +210,7 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
                 .header("X-Request-ID", generateRequestId())
                 .build();
 
-        log.debug("⚙️ Manual auth headers added for user: {}", username);
+        log.debug("⚙️ Manual auth headers added for user: {}", email);
         return chain.filter(exchange.mutate().request(modifiedRequest).build());
     }
     
@@ -243,6 +257,98 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
     /**
      * Generate unique request ID for tracing
      */
+    /**
+     * Industry Standard JWT validation with multi-layer caching
+     */
+    private Mono<Jwt> validateTokenIndustryStandard(String token) {
+        return Mono.fromCallable(() -> {
+            String tokenHash = String.valueOf(token.hashCode());
+            
+            // Layer 1: Check validation cache
+            Boolean cachedResult = jwtCacheService.getCachedValidationResult(tokenHash);
+            if (Boolean.FALSE.equals(cachedResult)) {
+                log.debug("🚫 JWT validation cache hit: INVALID");
+                return null;
+            }
+            
+            // Layer 2: Check token blacklist
+            String tokenId = extractTokenId(token);
+            if (tokenId != null && blacklistService.isTokenBlacklisted(tokenId)) {
+                log.debug("🚫 Token is blacklisted: {}", tokenId.substring(0, 8) + "...");
+                jwtCacheService.cacheValidationResult(tokenHash, false, 300);
+                return null;
+            }
+            
+            // Layer 3: JWT validation (expensive operation)
+            try {
+                Jwt jwt = jwtDecoder.decode(token);
+                
+                // Check expiry
+                if (jwt.getExpiresAt().isBefore(Instant.now())) {
+                    log.debug("🚫 Token expired");
+                    jwtCacheService.cacheValidationResult(tokenHash, false, 60);
+                    return null;
+                }
+                
+                // Cache successful validation
+                int ttl = (int) (jwt.getExpiresAt().getEpochSecond() - Instant.now().getEpochSecond());
+                jwtCacheService.cacheValidationResult(tokenHash, true, Math.min(ttl, 300));
+                
+                // Cache user context
+                var contextInfo = new GatewayJWTCacheService.UserContextInfo(
+                    jwt.getSubject(),
+                    jwt.getClaimAsString("email"),
+                    jwt.getClaimAsStringList("roles").toArray(new String[0]),
+                    jwt.getIssuedAt().getEpochSecond(),
+                    jwt.getExpiresAt().getEpochSecond()
+                );
+                jwtCacheService.cacheUserContext(jwt.getSubject(), contextInfo, Math.min(ttl, 600));
+                
+                log.debug("✅ JWT validation successful for user: {}", jwt.getSubject());
+                return jwt;
+                
+            } catch (Exception e) {
+                log.debug("🚫 JWT validation failed: {}", e.getMessage());
+                jwtCacheService.cacheValidationResult(tokenHash, false, 300);
+                return null;
+            }
+        });
+    }
+    
+    /**
+     * Extract Bearer token from Authorization header
+     */
+    private String extractBearerToken(ServerHttpRequest request) {
+        String authHeader = request.getHeaders().getFirst("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            return authHeader.substring(7);
+        }
+        return null;
+    }
+    
+    /**
+     * Extract token ID (jti) from JWT without full validation
+     */
+    private String extractTokenId(String token) {
+        try {
+            String[] parts = token.split("\\.");
+            if (parts.length != 3) return null;
+            
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]));
+            return extractJsonValue(payload, "jti");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    /**
+     * Generate unauthorized response
+     */
+    private Mono<Void> unauthorizedResponse(ServerWebExchange exchange) {
+        exchange.getResponse().setStatusCode(org.springframework.http.HttpStatus.UNAUTHORIZED);
+        return exchange.getResponse().setComplete();
+    }
+
     private String generateRequestId() {
         return java.util.UUID.randomUUID().toString().substring(0, 8);
     }
