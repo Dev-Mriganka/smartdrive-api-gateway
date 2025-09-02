@@ -62,13 +62,14 @@ spring:
                 name: auth-service-circuit-breaker
                 fallbackUri: forward:/fallback/auth
         
-        # 3. Public auth endpoints (login, register, verify)
-        - id: auth-service-public
+        # 3. Public auth endpoints (login, register, verify) - /api/auth/** pattern
+        - id: auth-service-public-api
           uri: http://auth-service:8082
           predicates:
-            - Path=/api/v1/auth/login,/api/v1/auth/register,/api/v1/auth/verify-email
+            - Path=/api/auth/**
           order: 3
           filters:
+            - RewritePath=/api/auth/(?<segment>.*), /api/v1/auth/$\{segment}
             - name: CircuitBreaker
               args:
                 name: auth-service-circuit-breaker

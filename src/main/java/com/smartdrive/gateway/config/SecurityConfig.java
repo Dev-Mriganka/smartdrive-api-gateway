@@ -52,6 +52,7 @@ public class SecurityConfig {
 
                         // 4. Auth endpoints - MUST BE BEFORE /api/** pattern!
                         .pathMatchers("/api/v1/auth/**").permitAll()
+                        .pathMatchers("/api/auth/**").permitAll()
                         
                         // 5. Social auth endpoints - completely public  
                         .pathMatchers("/api/v1/auth/social/**").permitAll()
@@ -73,29 +74,9 @@ public class SecurityConfig {
                         // 7. Everything else - allow (for static resources, etc.)
                         .anyExchange().permitAll())
 
-                // Configure OAuth2 resource server for authenticated routes
-                .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(Customizer.withDefaults())
-                        .authenticationEntryPoint((exchange, ex) -> {
-                            // Return proper 401 with error message
-                            log.warn("🚫 JWT authentication failed: {}", ex.getMessage());
-                            
-                            exchange.getResponse().setStatusCode(org.springframework.http.HttpStatus.UNAUTHORIZED);
-                            exchange.getResponse().getHeaders().add("Content-Type", "application/json");
-                            
-                            String errorResponse = """
-                                {
-                                    "error": "Unauthorized",
-                                    "message": "Invalid or missing JWT token",
-                                    "timestamp": "%s"
-                                }
-                                """.formatted(java.time.Instant.now());
-                            
-                            byte[] bytes = errorResponse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                            return exchange.getResponse().writeWith(
-                                reactor.core.publisher.Mono.just(exchange.getResponse().bufferFactory().wrap(bytes))
-                            );
-                        }));
+                // JWT validation handled by IndustryStandardJWTFilter
+                // No OAuth2 resource server configuration to avoid conflicts
+                ;
 
         log.info("✅ API Gateway security filter chain configured successfully");
         return http.build();

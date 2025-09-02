@@ -139,7 +139,9 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/auth/oauth2/") ||
                 path.startsWith("/auth/.well-known/") ||
+                path.startsWith("/oauth2/") || // Add JWKS endpoint
                 path.startsWith("/api/v1/auth/") ||
+                path.startsWith("/api/auth/") ||
                 path.equals("/api/v1/users/register") ||
                 path.startsWith("/api/v1/users/verify-email") ||
                 path.startsWith("/api/v1/users/profile/email") ||

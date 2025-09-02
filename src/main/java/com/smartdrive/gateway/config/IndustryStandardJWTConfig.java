@@ -12,7 +12,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
-import javax.crypto.spec.SecretKeySpec;
+
 
 /**
  * Industry Standard JWT Configuration for API Gateway
@@ -36,23 +36,24 @@ public class IndustryStandardJWTConfig {
 
     /**
      * Configure JWT Decoder for gateway-level validation
-     * Using shared secret for maximum performance (no network calls)
+     * Using RSA public key for asymmetric JWT validation
      */
     @Bean("gatewayJwtDecoder")
     public JwtDecoder jwtDecoder() {
-        log.info("🔧 Configuring Industry Standard JWT Decoder for Gateway");
+        log.info("🔧 Configuring Industry Standard JWT Decoder for Gateway with RSA validation");
         
-        // Use shared secret for fastest validation (no JWK endpoint calls)
-        SecretKeySpec key = new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256");
-        
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key)
-                .build();
-        
-        // Basic configuration - issuer validation will be done in the filter
-        // Keep it simple to avoid lambda compilation issues
-
-        log.info("✅ JWT Decoder configured with shared secret validation");
-        return decoder;
+        try {
+            // Use RSA public key validation for asymmetric JWTs
+            // This will automatically fetch the public key from the JWKS endpoint
+            NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri("http://auth-service:8082/oauth2/jwks")
+                    .build();
+            
+            log.info("✅ JWT Decoder configured with RSA public key validation via JWKS");
+            return decoder;
+        } catch (Exception e) {
+            log.error("❌ Failed to configure JWT Decoder with JWKS: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to configure JWT Decoder", e);
+        }
     }
 
     /**

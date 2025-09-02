@@ -160,7 +160,9 @@ public class RoleBasedAuthorizationFilter implements GlobalFilter, Ordered {
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/auth/oauth2/") ||
                path.startsWith("/auth/.well-known/") ||
+               path.startsWith("/oauth2/") || // Add JWKS endpoint
                path.startsWith("/api/v1/auth/") ||
+               path.startsWith("/api/auth/") ||
                path.equals("/api/v1/users/register") ||
                // path.equals("/api/v1/users/create-admin") || // REMOVED: Now requires authentication
                path.startsWith("/api/v1/users/verify-email") ||

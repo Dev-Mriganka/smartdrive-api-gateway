@@ -272,7 +272,9 @@ public class IndustryStandardJWTFilter implements GlobalFilter, Ordered {
      * Check if endpoint is public (no auth required)
      */
     private boolean isPublicEndpoint(String path) {
-        return path.startsWith("/api/v1/auth/") ||
+        return path.startsWith("/oauth2/") || // Add JWKS endpoint
+               path.startsWith("/api/v1/auth/") ||
+               path.startsWith("/api/auth/") ||
                path.equals("/api/v1/users/register") ||
                path.startsWith("/api/v1/users/verify-email") ||
                path.startsWith("/api/v1/users/profile/email") ||
